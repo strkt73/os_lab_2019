@@ -7,11 +7,20 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#define SERV_PORT 10050
-#define BUFSIZE 100
+//#define BUFSIZE 100
+//#define SERV_PORT 10050
 #define SADDR struct sockaddr
 
-int main() {
+int main(int argc, char *argv[]) {
+  
+  if (argc != 3) {
+    fprintf(stderr, "Usage: %s <port> <bufsize>\n", argv[0]);
+    exit(EXIT_FAILURE);
+  }
+
+  const int SERV_PORT = atoi(argv[1]);
+  const size_t BUFSIZE = atoi(argv[2]);
+  
   const size_t kSize = sizeof(struct sockaddr_in);
 
   int lfd, cfd;
@@ -28,7 +37,7 @@ int main() {
   memset(&servaddr, 0, kSize);
   servaddr.sin_family = AF_INET;
   servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-  servaddr.sin_port = htons(SERV_PORT);
+  servaddr.sin_port = htons(atoi(argv[1])); // Заменили порт на аргумент командной строки
 
   if (bind(lfd, (SADDR *)&servaddr, kSize) < 0) {
     perror("bind");
@@ -59,4 +68,6 @@ int main() {
     }
     close(cfd);
   }
+
+  return 0;
 }
