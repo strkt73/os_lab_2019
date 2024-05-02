@@ -1,18 +1,28 @@
+#include <ctype.h>
+#include <limits.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
-#include <signal.h>
+
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+
 #include <getopt.h>
-#include <stdbool.h>
-#include <limits.h>
+#include <signal.h>
+
 #include "find_min_max.h"
 #include "utils.h"
 
+// Глобальная переменная для хранения PID дочернего процесса
+pid_t child_pid;
+
 // Обработчик сигнала SIGALRM
-void handle_alarm(int signum) {
-    // Пустая функция, не требующая действий
+void handle_alarm(int sig) {
+    // Отправляем сигнал SIGKILL дочернему процессу
+    kill(child_pid, SIGKILL);
 }
 
 int main(int argc, char **argv) {
@@ -20,9 +30,8 @@ int main(int argc, char **argv) {
     int array_size = -1;
     int pnum = -1;
     bool with_files = false;
-    int timeout = -1; // Переменная для хранения времени таймаута
+    int timeout = -1; // Переменная для хранения таймаута
 
-    // Обработка аргументов командной строки
     while (true) {
         int current_optind = optind ? optind : 1;
 
@@ -31,43 +40,32 @@ int main(int argc, char **argv) {
             {"array_size", required_argument, 0, 0},
             {"pnum", required_argument, 0, 0},
             {"by_files", no_argument, 0, 'f'},
-            {"timeout", required_argument, 0, 't'}, // Новый аргумент командной строки для таймаута
+            {"timeout", required_argument, 0, 0}, // Добавляем опцию для установки таймаута
             {0, 0, 0, 0}};
 
         int option_index = 0;
         int c = getopt_long(argc, argv, "f", options, &option_index);
 
-        if (c == -1) break;
+        if (c == -1)
+            break;
 
         switch (c) {
             case 0:
                 switch (option_index) {
                     case 0:
                         seed = atoi(optarg);
-                        // Проверка на положительное число
-                        if (seed <= 0) {
-                            printf("Seed is a positive number\n");
-                            return 1;
-                        }
                         break;
                     case 1:
                         array_size = atoi(optarg);
-                        // Проверка на положительное число
-                        if (array_size <= 0) {
-                            printf("Array size is a positive number\n");
-                            return 1;
-                        }
                         break;
                     case 2:
                         pnum = atoi(optarg);
-                        // Проверка на положительное число
-                        if (pnum <= 0) {
-                            printf("Pnum is a positive number\n");
-                            return 1;
-                        }
                         break;
                     case 3:
                         with_files = true;
+                        break;
+                    case 4:
+                        timeout = atoi(optarg); // Считываем значение таймаута из аргумента командной строки
                         break;
                     default:
                         printf("Index %d is out of options\n", option_index);
@@ -76,14 +74,6 @@ int main(int argc, char **argv) {
             case 'f':
                 with_files = true;
                 break;
-            case 't':
-                timeout = atoi(optarg); // Установка времени таймаута
-                // Проверка на положительное число
-                if (timeout <= 0) {
-                    printf("Timeout should be a positive number\n");
-                    return 1;
-                }
-                break;
             case '?':
                 break;
             default:
@@ -91,14 +81,22 @@ int main(int argc, char **argv) {
         }
     }
 
-    // Проверка обязательных аргументов
+    if (optind < argc) {
+        printf("Has at least one no option argument\n");
+        return 1;
+    }
+
     if (seed == -1 || array_size == -1 || pnum == -1) {
         printf("Usage: %s --seed \"num\" --array_size \"num\" --pnum \"num\" [--timeout \"num\"]\n", argv[0]);
         return 1;
     }
 
-    // Установка обработчика сигнала SIGALRM
-    signal(SIGALRM, handle_alarm);
+    // Если таймаут задан, устанавливаем обработчик сигнала SIGALRM
+    if (timeout > 0) {
+        signal(SIGALRM, handle_alarm);
+        // Устанавливаем таймер сигнала
+        alarm(timeout);
+    }
 
     int *array = malloc(sizeof(int) * array_size);
     GenerateArray(array, array_size, seed);
@@ -106,11 +104,6 @@ int main(int argc, char **argv) {
 
     struct timeval start_time;
     gettimeofday(&start_time, NULL);
-
-    // Установка таймаута, если он был передан в аргументах командной строки
-    if (timeout > 0) {
-        alarm(timeout); // Установка таймера
-    }
 
     int pipefd[2];
     if (!with_files) {
@@ -131,6 +124,7 @@ int main(int argc, char **argv) {
                 } else {
                     min_max = GetMinMax(array, i * array_size / pnum, (i + 1) * array_size / pnum);
                 }
+
                 if (with_files) {
                     FILE *fp;
                     fp = fopen("temp.txt", "w+");
@@ -143,22 +137,17 @@ int main(int argc, char **argv) {
                 }
                 return 0;
             }
+
         } else {
             printf("Fork failed!\n");
             return 1;
         }
     }
 
-    // Ожидание завершения всех дочерних процессов
     while (active_child_processes > 0) {
         int status;
         wait(&status);
         active_child_processes -= 1;
-    }
-
-    // Проверка, истек ли таймаут
-    if (timeout > 0) {
-        alarm(0); // Сброс таймера
     }
 
     struct MinMax min_max;
